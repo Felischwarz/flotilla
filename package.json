@@ -1,0 +1,26 @@
+{
+  "name": "flotilla",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A local web dashboard for Claude Code background agents",
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "//postinstall": "npm ships node-pty's darwin spawn-helper without its exec bit; without this every pty.spawn fails with 'posix_spawnp failed'.",
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
+    "test": "node runtimes.test.mjs"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "node-pty": "^1.1.0",
+    "ws": "^8.21.1"
+  }
+}

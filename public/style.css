@@ -1,0 +1,1104 @@
+/* flotilla — black, with detail colour.
+   Three signals, each on its own physical channel so they can never be read as
+   one another:
+     · AGENT   = hue. LOUD in the sidebar row, where you pick things out of a
+                 list; only a thin accent inside a pane — top edge, active tab,
+                 the edge of your own messages. A wall of open panes each washed
+                 in its own hue was too much colour to read against.
+     · STATE   = the dot, plus the pane's background LIGHTNESS
+                 (grey while running, black at rest, amber when it wants you).
+     · MOTION  = only ever means "this one is moving right now". */
+
+:root {
+  /* RAM panel series, in bar order. A colour-blind-safe palette's dark steps,
+     validated on the panel surface #0e0e12 (all checks pass, worst adjacent CVD
+     ΔE 8.4). macOS is grey on purpose: nothing in the fleet can shrink it. */
+  --mem-agents: #3987e5;
+  --mem-tools:  #d95926;
+  --mem-chrome: #199e70;
+  --mem-cursor: #c98500;
+  --mem-other:  #d55181;
+  --mem-system: #55555e;
+  --bg:        #08080a;
+  --bg-2:      #0e0e11;
+  --bg-3:      #16161a;
+  --line:      #232327;
+  --line-2:    #33333a;
+  --fg:        #ececee;
+  --fg-dim:    #a0a0a8;
+  --fg-faint:  #6a6a74;
+
+  /* traffic light — never used as an agent identity colour */
+  --go:        #4ade80;
+  --wait:      #fbbf24;
+  --stop:      #f87171;
+  --rest:      #7a8494;
+  /* finished-and-unseen: the same blue the favicon badge paints */
+  --seen:      #7dd3fc;
+  --off:       #5a5a64;
+  /* the pin: a channel of its own, never one of the lane colours — "I am
+     keeping this" must not be readable as a state the agent is in */
+  --pin:       #c4b5fd;
+
+  /* State surfaces. "Working" used to be a distinctly lighter grey block, which
+     read as a different kind of window rather than the same window doing
+     something. It is now barely above resting, and MOTION carries the signal
+     instead — a wave that travels up the pane. Movement catches the eye across
+     a room better than a flat brightness step ever did, and it does not change
+     how the surface looks when you are reading it. */
+  --sf-working: #0b0b0f;
+  --sf-rest:    #050506;
+  --sf-needs:   #2a1e07;
+  --sf-failed:  #2a1014;
+
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--sans); font-size: 14.5px; line-height: 1.6;
+  display: flex; flex-direction: column; overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+.spacer { flex: 1; }
+code { font-family: var(--mono); font-size: .88em; }
+.nores { padding: 16px; color: var(--fg-faint); font-size: 13px; text-align: center; }
+.tiny { font-size: 12px; color: var(--fg-faint); }
+
+/* ---------- window-level alert ---------- */
+.frame { position: fixed; inset: 0; pointer-events: none; z-index: 90; border: 0 solid transparent; transition: border-width .18s, border-color .18s; }
+.frame.needs  { border-width: 4px; border-color: rgba(251,191,36,.25); --bw: 4px; }
+.frame.done   { border-width: 4px; border-color: var(--go); }
+.frame.failed { border-width: 4px; border-color: var(--stop); }
+
+/* THE PULSE IS AN OPACITY NOW, NOT A COLOUR. An animated `border-color` is
+   re-styled and re-painted ON THE MAIN THREAD every frame, on every element
+   wearing it — and this one sat on the window frame, the header pill and the
+   live foot at once. Measured on an idle page with four panes open: 500ms of
+   style recalc per 15 seconds, and it DOUBLED the latency of every
+   interaction (two-frame latency 21ms with the animations running, 12ms with
+   them off). An overlay whose `opacity` animates is the same picture to the
+   eye and runs on the compositor, so the main thread never hears about it.
+
+   The element keeps the DIM end as its resting colour and the overlay fades
+   the bright one in over it: .25 + .8 × (1 − .25) ≈ .85 — the two ends the old
+   keyframes had, unchanged. */
+.frame.needs::after, .pill.hot::after, .livefoot.needs::after {
+  content: ''; position: absolute; inset: calc(-1 * var(--bw)); pointer-events: none;
+  border: var(--bw) solid rgba(251,191,36,.8);
+  border-radius: inherit;
+  animation: fadepulse 2.4s ease-in-out infinite;
+}
+@keyframes fadepulse { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* ---------- top bar ---------- */
+#topbar { display: flex; align-items: center; gap: 13px; padding: 0 14px; height: 54px; flex: 0 0 54px; background: #0b0b0e; border-bottom: 1px solid var(--line); }
+.brand { display: flex; align-items: center; gap: 9px; font-size: 16px; }
+.brand b { color: #fff; font-weight: 700; }
+.logo { color: #a78bfa; font-size: 19px; }
+.counts { display: flex; gap: 6px; flex-wrap: wrap; }
+.pill { font-size: 11.5px; padding: 3px 9px; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--line-2); color: var(--fg-dim); white-space: nowrap; }
+.pill b { color: var(--fg); font-weight: 600; }
+.pill.hot { position: relative; border-color: rgba(251,191,36,.25); background: #241c08; color: var(--wait); --bw: 1px; }
+.pill.run { border-color: #1d5a3a; background: #0d1f14; color: var(--go); }
+.conn { font-size: 22px; color: var(--stop); line-height: 1; }
+.conn.on { color: var(--go); }
+
+.btn { font: inherit; font-size: 13px; cursor: pointer; background: var(--bg-3); color: var(--fg); border: 1px solid var(--line-2); border-radius: 8px; padding: 7px 13px; transition: .13s; }
+.btn:hover { background: #202027; border-color: #4a4a55; }
+.btn.primary { background: #1f2937; border-color: #4b5563; color: #fff; }
+.btn.primary:hover { background: #2b3749; }
+.btn.ghost { background: transparent; }
+.btn.small { padding: 4px 9px; font-size: 12px; }
+.btn.danger:hover { background: #3a1416; border-color: #7f2a2f; color: #ffd7d7; }
+.btn[disabled] { opacity: .4; cursor: not-allowed; }
+
+/* ---------- usage strip ---------- */
+.usage-strip { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--fg-faint); font-family: var(--mono); }
+.usage-strip b { color: var(--fg); font-size: 12.5px; }
+.ulabel { text-transform: uppercase; letter-spacing: .6px; }
+.ubar { width: 74px; height: 6px; background: var(--bg-3); border-radius: 999px; overflow: hidden; border: 1px solid var(--line-2); }
+.ufill { height: 100%; background: linear-gradient(90deg, #38bdf8, #a78bfa); }
+.ubar.over .ufill { background: linear-gradient(90deg, #fbbf24, #f87171); }
+.upct.over { color: var(--wait); }
+.usage-strip { cursor: pointer; }
+.ubar { position: relative; }
+.umark { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #fff; opacity: .85; border-radius: 1px; }
+.usagepanel {
+  position: fixed; z-index: 80; width: 330px; padding: 14px 16px 12px;
+  background: #0e0e12; border: 1px solid var(--line-2); border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(0,0,0,.75); font-size: 13px;
+}
+.usagepanel h4 { margin: 12px 0 6px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .8px; color: var(--fg-faint); font-weight: 700; }
+.usagepanel h4:first-child { margin-top: 0; }
+.urow { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.uk { color: var(--fg-dim); }
+.uv { color: #fff; font-variant-numeric: tabular-nums; }
+.uv.warn { color: var(--wait); } .uv.good { color: var(--go); }
+.ubars { display: flex; align-items: flex-end; gap: 3px; height: 60px; margin-top: 4px; }
+.ubcol { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; }
+.ub { width: 100%; background: #3b3b45; border-radius: 2px; }
+.ubcol:last-child .ub { background: #a78bfa; }
+.ubd { font-size: 9px; color: var(--fg-faint); }
+.unote { margin: 12px 0 0; font-size: 11px; line-height: 1.5; color: var(--fg-faint); }
+/* ---------- memory strip + panel ---------- */
+/* A fourth strip in the top bar: nothing in it may wrap onto a second line, the chips shrink instead. */
+#topbar .usage-strip, #topbar .btn { white-space: nowrap; }
+.mem-strip { flex-shrink: 0; }
+.mem-strip .ubar { width: 48px; }
+.mempanel { width: 400px; max-height: calc(100vh - 90px); overflow-y: auto; }
+.memhead { margin-bottom: 12px; }
+.memhead .big { font-size: 26px; font-weight: 700; color: #fff; line-height: 1.1; }
+.memhead .sub { font-size: 12px; color: var(--fg-dim); margin-top: 3px; line-height: 1.4; }
+.memloading { color: var(--fg-faint); font-size: 12px; }
+.memchart { margin: 22px 0 4px; }
+.memtrack { position: relative; height: 20px; }
+/* Square at the baseline, 4px round at the data end, 2px surface gap between
+   segments — the gap separates them, never a stroke. */
+.memstack { display: flex; gap: 2px; height: 20px; border-radius: 0 4px 4px 0; overflow: hidden; }
+.memseg { min-width: 2px; height: 100%; cursor: default; }
+.memseg:hover { filter: brightness(1.18); }
+.memline { position: absolute; top: -7px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--fg); border-radius: 1px; pointer-events: none; }
+.memline-label { position: absolute; bottom: 100%; right: 4px; margin-bottom: 1px; font-size: 10.5px; color: var(--fg-dim); white-space: nowrap; }
+.memover { font-size: 10.5px; color: var(--fg-faint); text-align: right; margin-top: 5px; }
+.memlegend { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 14px; margin-top: 10px; }
+.memleg { display: flex; align-items: center; gap: 7px; font-size: 12px; padding: 1px 0; cursor: default; }
+.memleg .uk { flex: 1; min-width: 0; }
+.memsw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.memst { display: inline-flex; align-items: center; gap: 6px; }
+.memst-ic { font-size: 10px; }
+.memst-ic.good { color: var(--go); } .memst-ic.warn { color: var(--wait); } .memst-ic.crit { color: var(--stop); }
+.memidle { font-size: 12px; color: var(--fg-dim); margin-bottom: 6px; }
+.memagents { display: flex; flex-direction: column; gap: 1px; }
+.memagent { display: grid; grid-template-columns: minmax(0, 1fr) auto 58px; gap: 10px; align-items: baseline; font-size: 12px; padding: 3px 0; border-top: 1px solid var(--line); }
+.memagent:first-child { border-top: 0; }
+.mem-name { color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memagent.idle .mem-name { color: var(--fg); }
+.mem-when { color: var(--fg-faint); font-size: 11px; white-space: nowrap; }
+.memagent.idle .mem-when { color: var(--seen); }
+.mem-size { color: #fff; text-align: right; font-variant-numeric: tabular-nums; }
+.memmore { font-size: 11px; color: var(--fg-faint); padding-top: 4px; }
+.memfoot { font-size: 10.5px; color: var(--fg-faint); margin-top: 8px; }
+.memctl { margin-top: 4px; border-top: 1px solid var(--line); padding-top: 2px; }
+.memrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; font-size: 12.5px; cursor: pointer; }
+.memchk { justify-content: flex-start; }
+.memchk input { accent-color: var(--seen); margin: 0; }
+.memsel { font: inherit; font-size: 12px; background: var(--bg-3); color: var(--fg); border: 1px solid var(--line-2); border-radius: 6px; padding: 3px 6px; }
+#memnow { margin-top: 6px; width: 100%; }
+.memtoday { font-size: 11px; color: var(--fg-dim); margin-top: 8px; }
+.memtip {
+  position: absolute; z-index: 2; width: 260px; padding: 9px 11px; pointer-events: none;
+  background: #16161b; border: 1px solid var(--line-2); border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.6); font-size: 12px;
+}
+.memtip-h { color: #fff; font-weight: 600; margin-bottom: 5px; }
+.memtip-s { color: var(--fg-faint); font-size: 11px; line-height: 1.45; margin-top: 6px; }
+.memtip .uk { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+.spark { display: flex; align-items: flex-end; gap: 2px; height: 22px; }
+.spark span { width: 4px; background: #3b3b45; border-radius: 1px; }
+.spark span:last-child { background: #a78bfa; }
+
+/* ---------- layout ---------- */
+#layout { flex: 1; display: flex; min-height: 0; }
+#sidebar { width: 330px; flex: 0 0 330px; display: flex; flex-direction: column; background: #0b0b0e; border-right: 1px solid var(--line); min-height: 0; }
+.searchwrap { padding: 10px; border-bottom: 1px solid var(--line); }
+#search { width: 100%; font: inherit; font-size: 13px; background: var(--bg); color: var(--fg); border: 1px solid var(--line-2); border-radius: 8px; padding: 7px 10px; }
+#search:focus { outline: none; border-color: #6b7280; }
+.list { flex: 1; overflow-y: auto; padding: 7px; }
+.sidefoot { border-top: 1px solid var(--line); padding: 8px 10px; display: flex; gap: 14px; font-size: 12px; color: var(--fg-dim); }
+.chk { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+
+.listctl { display: flex; gap: 5px; margin-top: 8px; }
+.listctl select {
+  flex: 1; min-width: 0; font: inherit; font-size: 11.5px; cursor: pointer;
+  background: var(--bg-3); color: var(--fg-dim); border: 1px solid var(--line-2);
+  border-radius: 7px; padding: 4px 6px;
+}
+.listctl select:focus { outline: none; border-color: #6b7280; }
+.icobtn { font: inherit; font-size: 12px; cursor: pointer; background: var(--bg-3); color: var(--fg-dim); border: 1px solid var(--line-2); border-radius: 7px; padding: 4px 9px; }
+.icobtn:hover { color: #fff; border-color: #4a4a55; }
+.icobtn.wide { padding: 4px 11px; }
+.icobtn.on { background: #2b3749; color: #fff; border-color: #4b5563; }
+
+.group { font-size: 10.5px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase; color: var(--fg-faint); padding: 13px 8px 6px; display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; }
+.group::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.group:hover { color: var(--fg-dim); }
+.gname { flex: 0 0 auto; }
+.gcount { color: var(--fg-faint); opacity: .7; font-weight: 600; }
+.gunread { margin-left: auto; color: #fff; background: rgba(255,255,255,.14); border-radius: 999px; padding: 1px 7px; font-size: 9.5px; letter-spacing: .3px; }
+.group.collapsed::before { border-radius: 1px; }
+.group.collapsed .gname { opacity: .6; }
+.group.needs { color: var(--wait); } .group.working { color: var(--go); }
+.group.failed { color: var(--stop); } .group.done { color: #8a94a6; }
+/* The pinned group is not a lane and never collapses — it is the shelf you put
+   things on, so it stays legible even when every other header is grey. */
+.group.pins { color: var(--pin); cursor: default; }
+.group.pins::before { border-radius: 1px; transform: rotate(45deg); }
+
+/* ---------- agent row ----------
+   Four questions, four separate channels, so none of them can be misread as
+   another:
+     WHICH agent   → the colour bar on the left. Same width and strength on
+                     every row, so brightness never means identity.
+     WHAT state    → the dot (and the lane grouping above it).
+     UNREAD        → weight and brightness, the way mail does it. This is the
+                     only thing allowed to make a row "louder".
+     OPEN / FOCUS  → a numbered badge and a ring. Shape and position, not
+                     colour — the previous design said "open" with MORE of the
+                     identity colour, which read as "unread". */
+.row-agent {
+  --c: #60a5fa;
+  /* `default`, not `pointer`: the card is not a button any more. Its buttons
+     are, and they are always on it. */
+  position: relative; cursor: default; margin-bottom: 5px;
+  padding: 9px 11px 9px 13px; border-radius: 9px;
+  background: #101014;
+  border: 1px solid #1e1e24;
+  transition: background .12s, border-color .12s;
+  /* A ROW OFF THE SCREEN IS NOT LAID OUT. This fleet draws 430 of them and
+     about nine are visible; without this line every one of the other 421 was
+     restyled and re-laid-out on every pass — measured as the largest single
+     block of browser-internal time in the profile, larger than all of the
+     script put together. `auto` in the size means the browser REMEMBERS what
+     each row really measured, so the scrollbar is exact after the first look
+     and the row is fully there the moment it scrolls in. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 62px;
+}
+/* identity: constant, never louder or quieter */
+.row-agent::before {
+  content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 4px;
+  border-radius: 0 3px 3px 0; background: var(--c);
+}
+.row-agent:hover { background: #17171d; border-color: #2c2c34; }
+
+/* unread: the only "louder" state. It has to carry without the lane grouping
+   (the default is no groups), so the row LIGHTS in its own colour — a glow
+   around the identity bar and a tinted edge — until you read it. */
+.row-agent.unread {
+  background: #1c1c27;
+  border-color: color-mix(in srgb, var(--c) 55%, #34343f);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 30%, transparent), 0 0 16px -3px var(--c);
+}
+.row-agent.unread::before { width: 5px; box-shadow: 0 0 10px 1px var(--c); }
+.row-agent.unread .r-name { font-weight: 800; color: #fff; }
+.row-agent.unread .r-detail { color: #c8c8d2; }
+.row-agent:not(.unread) .r-name { color: #b9b9c4; }
+.row-agent:not(.unread) .r-detail { opacity: .8; }
+.unread-pip { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--c); box-shadow: 0 0 7px var(--c); }
+
+/* open: a numbered badge that says which pane it sits in */
+.openbadge {
+  flex: 0 0 auto; min-width: 17px; height: 17px; padding: 0 4px;
+  border-radius: 5px; font-size: 10.5px; font-weight: 700; line-height: 17px;
+  text-align: center; font-family: var(--mono);
+  background: #2a2a33; color: var(--fg-dim); border: 1px solid #3a3a46;
+}
+.row-agent.isopen { border-color: #3a3a46; }
+.row-agent.isfocused { background: #1b232c; border-color: #4d7fa6; box-shadow: 0 0 0 1px #4d7fa6; }
+.row-agent.isfocused .openbadge { background: #4d7fa6; color: #fff; border-color: #6ea3cc; }
+.row-agent.isfocused .r-name { color: #fff; }
+/* the cursor mark: a notch on the edge you are working from */
+.row-agent.isfocused::after {
+  content: ''; position: absolute; right: -1px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 26px; border-radius: 3px 0 0 3px; background: #7fb4d9;
+}
+
+.rtop { display: flex; align-items: center; gap: 8px; }
+.r-name { flex: 1; min-width: 0; font-weight: 550; font-size: 13.5px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ALWAYS DRAWN. These used to appear on hover, which costs a deliberate move
+   and a wait before the target even exists — and because the row is rebuilt
+   while the list updates, the replacement node did not count as hovered until
+   the mouse moved AGAIN. That is the "buttons show up after a few seconds".
+   They are the reason to look at a row, so they are drawn with it; half
+   opacity keeps 236 rows from reading as 700 buttons. */
+.r-acts { flex: 0 0 auto; display: flex; gap: 2px; opacity: .5; transition: opacity .1s; }
+.row-agent:hover .r-acts, .row-agent.unread .r-acts { opacity: 1; }
+.r-ico { font: inherit; font-size: 12px; line-height: 1; cursor: pointer; background: rgba(255,255,255,.08); color: #e8e8ee; border: none; border-radius: 6px; padding: 4px 5px; }
+.r-ico:hover { background: rgba(255,255,255,.24); }
+/* Pressing IS the action here (pointerdown), so the press has to be visible. */
+.r-ico:active { background: rgba(255,255,255,.42); transform: translateY(1px); }
+/* The drawn icons sit on the text baseline unless told otherwise, which pushes
+   the button 3px taller than its ⌫ neighbour. */
+.r-ico svg, .ph-ico svg { display: block; }
+/* Read: an outline, and quieter than the row's other buttons — a state you have
+   already dealt with should not compete with the ones you have not. Unread is
+   solid AND full brightness, so "is there mail here" survives a squint. */
+.ico-mail { opacity: .55; }
+.ico-mail.full { opacity: 1; }
+.r-ico:hover .ico-mail { opacity: 1; }
+/* Same grammar as the envelope: outline = the button would pin it, solid = it
+   IS pinned. Solid also gets the pin colour, because a mark that survives you
+   leaving the chat should be findable without reading anything. */
+.ico-pin { opacity: .5; }
+.ico-pin.full { opacity: 1; color: var(--pin); }
+.r-ico:hover .ico-pin { opacity: 1; }
+/* pinned rows never hide their pin behind the row's resting dimness */
+.row-agent.pinned .r-acts { opacity: 1; }
+.row-agent.pinned:not(.unread):not(.isfocused) { border-color: #46405c; }
+
+.dot { position: relative; flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--off); }
+.dot.working { background: var(--go); animation: breathe 1.7s ease-in-out infinite; }
+.dot.needs   { background: var(--wait); animation: blink 1.05s steps(2, start) infinite; }
+.dot.failed  { background: var(--stop); }
+.dot.done    { background: var(--rest); }
+.dot.hollow  { background: transparent !important; border: 2px solid var(--off); width: 11px; height: 11px; animation: none; }
+.dot.hollow::after { display: none; }
+/* The dot itself only scales; the ring that used to be an animated `box-shadow`
+   is now a solid disc behind it that scales and fades. Same breath, but the
+   whole thing is transform+opacity, so the compositor runs it. This one mattered
+   most of the four: there is a dot on every row and every pane head. */
+.dot.working::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  background: rgba(74,222,128,.55);
+  animation: breathering 1.7s ease-in-out infinite;
+}
+@keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.22); } }
+@keyframes breathering { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(2.33); opacity: 0; } }
+@keyframes blink { 50% { opacity: .2; } }
+
+.r-act { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 12px; color: var(--go); font-family: var(--mono); }
+.r-detail { font-size: 12.5px; color: var(--fg-dim); margin-top: 5px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.r-detail.said { border-left: 2px solid rgba(255,255,255,.14); padding-left: 8px; }
+.r-meta { font-size: 11px; color: var(--fg-faint); margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.r-meta .tag { font-family: var(--mono); }
+.badge-wait { color: #120d02; background: var(--wait); border-radius: 4px; padding: 0 5px; font-size: 10.5px; font-weight: 700; }
+.badge-draft { color: #fff; background: rgba(255,255,255,.13); border-radius: 4px; padding: 0 5px; font-size: 10.5px; }
+
+.dots { display: inline-flex; gap: 2px; }
+.dots span { width: 3px; height: 3px; border-radius: 50%; background: currentColor; animation: hop 1.1s infinite; }
+.dots span:nth-child(2) { animation-delay: .16s; }
+.dots span:nth-child(3) { animation-delay: .32s; }
+@keyframes hop { 0%,60%,100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+
+/* ---------- detail area ---------- */
+#detail { flex: 1; display: flex; min-width: 0; min-height: 0; background: var(--sf-rest); }
+.empty { flex: 1; display: grid; place-items: center; padding: 40px; }
+.emptyinner { max-width: 480px; text-align: center; color: var(--fg-dim); }
+.emptyglyph { font-size: 44px; color: var(--line-2); }
+.emptyinner h2 { color: var(--fg); font-weight: 600; margin: 8px 0; }
+
+/* Columns of stacked panes, every divider draggable. Horizontal scroll rather
+   than reflowing into rows: side by side is what you asked the layout for. */
+.panes { flex: 1; display: flex; min-width: 0; min-height: 0; overflow-x: auto; overflow-y: hidden; }
+/* If stacked panes cannot all fit at their minimum, the COLUMN scrolls. Without
+   this the last pane was simply clipped, taking its input box with it. */
+.col { flex: 1 1 0; min-width: 320px; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+/* An inert 6px anchor so the last column HAS a right edge inside the strip —
+   "make it wider" is a right-edge gesture, and the rightmost column had no edge
+   to grab. It must never grow: the first version was `flex: 1 1 0`, the same as
+   an auto column, so it quietly took an equal share and two panes rendered at
+   353px each on a 1070px strip instead of ~530. */
+.colspacer { flex: 0 0 auto; width: 6px; min-width: 0; align-self: stretch; }
+/* A divider OCCUPIES 5px and draws a 1px line inside itself. The first version
+   was 1px wide with a -4px inset pseudo-element for grabbing, which made the
+   column and row dividers overlap at their crossing point — aiming at the
+   corner grabbed the one you were not pointing at. Real width means they
+   cannot overlap at all, instead of relying on half-pixel hit-testing. */
+.split-h, .split-v { flex: 0 0 auto; position: relative; z-index: 3; touch-action: none; background: transparent; }
+.split-h { width: 5px; cursor: col-resize; }
+.split-v { height: 5px; cursor: row-resize; }
+.split-h::before, .split-v::before { content: ''; position: absolute; background: var(--line); transition: background .12s; }
+.split-h::before { inset: 0 2px; }
+.split-v::before { inset: 2px 0; }
+.split-h:hover::before, .split-v:hover::before,
+.split-h:active::before, .split-v:active::before { background: var(--fg-faint); }
+/* while dragging, nothing else should select text or steal the cursor */
+body.dragging { user-select: none; cursor: col-resize; }
+body.dragging * { pointer-events: none; }
+body.dragging .split-h, body.dragging .split-v { pointer-events: auto; }
+
+/* ---------- one pane ---------- */
+.pane-col {
+  --c: #60a5fa;
+  /* position: relative is load-bearing — the running wave is an absolutely
+     positioned pseudo-element, and without a positioned ancestor its containing
+     block is the VIEWPORT. Measured: the wave was 1600px wide across the whole
+     window while the pane was 1270px. */
+  position: relative;
+  flex: 1 1 0; min-width: 0; min-height: 210px; display: flex; flex-direction: column;
+  background: var(--sf-rest);
+  border-top: 3px solid var(--c);
+  transition: background .25s;
+  overflow: hidden;
+  /* Each pane keeps its layout to itself: a line appended to one transcript
+     must not make the browser measure the other seven panes again. Safe to
+     state here because this box already clips (`overflow: hidden`) and is
+     already the containing block of everything in it (`position: relative`). */
+  contain: layout style;
+}
+/* the from-two-metres signal: the surface itself */
+.pane-col.working { background: var(--sf-working); }
+/* the pulse: one soft band rising through the pane, ~4s, very low contrast */
+.pane-col.working::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 62%;
+  pointer-events: none; z-index: 0;
+  background: linear-gradient(to top,
+    transparent 0%,
+    rgba(74, 222, 128, .13) 30%,
+    rgba(74, 222, 128, .26) 52%,
+    rgba(74, 222, 128, .11) 70%,
+    transparent 100%);
+  animation: panewave 3.6s cubic-bezier(.45, 0, .55, 1) infinite;
+  /* It already only moves transform and opacity — but without a layer of its
+     own the compositor cannot take it, and a band this size then repaints the
+     whole pane every frame. One line, and the wave leaves the main thread. */
+  will-change: transform, opacity;
+}
+@keyframes panewave {
+  0%   { transform: translateY(60%);  opacity: 0; }
+  14%  { opacity: 1; }
+  86%  { opacity: 1; }
+  100% { transform: translateY(-185%); opacity: 0; }
+}
+/* content rides above the wave */
+.pane-col > * { position: relative; z-index: 1; }
+.pane-col.needs   { background: var(--sf-needs); }
+.pane-col.failed  { background: var(--sf-failed); }
+
+/* PINNED: the pane comes out of the black. Grey is the whole signal — you can
+   see from across the room which of eight open panes is the one you are coming
+   back to, without a badge to read.
+
+   `:not(.needs):not(.failed)` because those two surfaces ARE the alarm: a pane
+   that wants you must not be repainted by a mark you put on it yourself. The
+   lighter head and the violet top edge carry the pin in those two lanes
+   instead, so no pinned pane is ever unmarked. */
+.pane-col.pinned:not(.needs):not(.failed) { background: #17171f; }
+/* The SAME recipe as every other head (13% of the agent's colour), only on a
+   lighter base — a flat white wash here would have taken the identity tint out
+   of exactly the panes you look at most. */
+.pane-col.pinned .pane-head { background: color-mix(in srgb, var(--c) 13%, #1e1e28); }
+/* The violet line sits on the HEAD, not on the pane. `.pane-col.found` — the
+   two-blink "it is THIS one" flash — is an animation with `fill: both`, so its
+   last keyframe (a transparent box-shadow) keeps overriding the pane's own
+   box-shadow forever after the flash. Measured: the line was simply never
+   there on any pane you had jumped to. */
+.pane-col.pinned .pane-head { box-shadow: inset 0 3px 0 0 var(--pin); }
+.ph-ico.on { color: var(--pin); }
+
+/* "It is THIS one." Two blinks, then gone — long enough to catch the eye after
+   a smooth scroll has finished, short enough that it can never be mistaken for
+   a state. In the agent's own colour, so the flash and the row you clicked are
+   visibly the same thing. An INSET ring, because the parent clips overflow and
+   an outer glow would simply not be drawn. */
+.pane-col.found { animation: paneFound 1.4s ease-out both; }
+@keyframes paneFound {
+  0%, 26%, 52% { box-shadow: inset 0 0 0 3px var(--c); }
+  14%, 38%     { box-shadow: inset 0 0 0 3px transparent; }
+  100%         { box-shadow: inset 0 0 0 3px transparent; }
+}
+
+/* The header is a NEUTRAL surface. It used to be washed in the agent's hue,
+   which turned a wall of open panes into a wall of colour. The hue still says
+   which agent this is — through the top edge, the dot, the active tab and the
+   accents inside — and that is enough. Colour as detail, not as area. */
+.pane-head {
+  padding: 11px 14px 10px; background: rgba(255, 255, 255, .035); border-bottom: 1px solid var(--line);
+  /* may shrink and clip ITSELF when the pane is short. Everything above the
+     input is allowed to give way; the input never is. */
+  flex: 0 1 auto; min-height: 0; overflow: hidden;
+}
+/* The row WRAPS. The title is a flex item asking for at least 170px; when the
+   seven icons leave less than that, it takes a line of its own and they drop
+   below it — no width class, no breakpoint, the layout works it out. */
+.ph-line { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; row-gap: 4px; }
+/* The WHOLE name, never cut — the six-line limit is a floor under a different
+   problem, not a budget for names.
+
+   Measured over the real fleet, the lengths are 8 11 13 … 59 65, then 593 616
+   894 1018 1863. Those five are not names: Claude Code stores the whole opening
+   PROMPT in `state.json`'s `name` when no title was generated, and a 1863-char
+   "name" renders as 85 lines that swallow the entire pane. The clamp sits in
+   that 65→593 gap (~140 chars at this width), so every real name is shown in
+   full and only a prompt-in-the-name-field is bounded; hovering gives all of it.
+
+   Before, the clamp was THREE lines and the title shared its row with seven
+   icons, so it wrapped inside a ~90px column: three lines was about four words. */
+.ph-title { flex: 1 1 170px; min-width: 0; font-size: 15px; font-weight: 650; color: #fff; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden;
+  overflow-wrap: anywhere; }
+.ph-icons { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: auto; }
+.ph-close, .ph-ico { font: inherit; font-size: 12px; cursor: pointer; background: transparent; border: none; color: var(--fg-faint); padding: 2px 6px; border-radius: 6px; flex: 0 0 auto; }
+.ph-close:hover, .ph-ico:hover:not([disabled]) { background: rgba(255,255,255,.12); color: #fff; }
+.ph-ico[disabled] { opacity: .25; cursor: default; }
+.pill.unreadpill { border-color: #4a5a6b; background: #101822; color: #9fd4ff; }
+.ph-line2 { display: flex; align-items: center; gap: 9px; margin-top: 8px; flex-wrap: wrap; }
+.ph-sub { font-size: 11.5px; color: var(--fg-faint); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-acts { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+
+.state-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; padding: 4px 10px; border-radius: 6px; background: var(--bg-3); color: var(--fg-dim); font-family: var(--mono); }
+.state-chip.working { background: #0d1f14; color: var(--go); text-transform: none; letter-spacing: 0; font-size: 12px; }
+/* No pulse here: `.state-chip` has no border at all, so the old `border-color`
+   animation on it drew exactly nothing — it only paid for the style recalc. */
+.state-chip.needs { background: #2a2008; color: var(--wait); }
+.state-chip.failed { background: #2a1114; color: var(--stop); }
+
+/* The row scrolls sideways rather than clipping. It used to just overflow into
+   `overflow: hidden` on the pane, which silently ate the ↓ of the prompt jumper
+   in any pane under ~460px — a control that is invisible AND unreachable is
+   worse than one you have to scroll to. The narrow rules below shrink the
+   optional parts first, so the scroll is a last resort, not the normal case. */
+.pane-tabs {
+  flex: 0 0 auto; display: flex; gap: 2px; padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+}
+.pane-tabs::-webkit-scrollbar { display: none; }
+.pane-tabs > * { flex: 0 0 auto; }
+.pane-tabs > .spacer { flex: 1 1 auto; min-width: 0; }
+.lbl-short { display: none; }
+.pane-col.narrow .pane-tabs .tab { padding-left: 7px; padding-right: 7px; }
+.pane-col.narrow .pn-label { display: none; }
+.pane-col.vnarrow .lbl-long { display: none; }
+.pane-col.vnarrow .lbl-short { display: inline; }
+.tab { font: inherit; font-size: 12.5px; background: none; border: none; cursor: pointer; color: var(--fg-faint); padding: 8px 11px; border-bottom: 2px solid transparent; }
+.tab:hover { color: var(--fg-dim); }
+.tab.active { color: #fff; border-bottom-color: var(--c); }
+
+.pane-body { flex: 1 1 0; overflow-y: auto; padding: 16px 16px 8px; min-height: 0; }
+.pane-footwrap { flex: 0 0 auto; padding: 0 16px 10px; }
+
+/* ---------- chat ---------- */
+/* WHO SAID IT is a difference of SHAPE, not of shade. Two cards that differ
+   only by a border colour still read as one column of cards; you have to look
+   at the label to know who is talking. So the two roles now differ in the one
+   property the eye sorts before it reads:
+
+     Claude   flush left, no card at all — the document you are reading
+     You      an inset card in the agent colour, with a dot in the gutter
+
+   Everything else (tools, system, subagents) stays quiet on purpose — the
+   conversation is the two of you. */
+.msg { margin: 0 0 18px; }
+.msg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 11px; color: var(--fg-faint); text-transform: uppercase; letter-spacing: .5px; }
+.who { font-weight: 700; }
+.msg.assistant .who { color: #fff; }
+.bubble { background: rgba(255,255,255,.035); border: 1px solid var(--line); border-radius: 11px; padding: 12px 15px; }
+
+/* Claude: no container. Long answers read like a page, not like a stack. */
+.msg.assistant > .bubble { background: transparent; border: none; padding: 0; }
+
+/* You: indented, filled in your agent's colour, marked in the gutter. */
+.msg.user { margin-left: 30px; position: relative; }
+.msg.user .who { color: var(--c); }
+.msg.user > .bubble {
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+  border-left: 3px solid var(--c);
+  border-radius: 12px;
+}
+.msg.user.prompt > .msg-head::before {
+  content: ''; position: absolute; left: -30px; top: 3px;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--c); box-shadow: 0 0 9px -1px var(--c);
+}
+
+.msg.system .bubble { background: transparent; border-style: dashed; color: var(--fg-dim); font-size: 13px; }
+.msg.summary .who { color: var(--fg-faint); }
+.msg.summary > .bubble { background: transparent; border: none; padding: 0; }
+/* A subagent's turn is not yours — same indent, but hollow, and no gutter dot. */
+.msg.side { margin-left: 30px; }
+.msg.side > .bubble { background: transparent; border: 1px dashed var(--line-2); border-left: 3px solid var(--c); border-radius: 12px; padding: 12px 15px; }
+.msg.tool .who { color: var(--fg-faint); }
+.msg.tool .bubble { background: transparent; border: none; padding: 0; }
+.msg.fresh > .bubble { animation: arrive .8s ease-out; }
+@keyframes arrive { from { background: rgba(255,255,255,.13); border-color: var(--c); } }
+
+/* Where the jumper just put you. It fades, because a permanent highlight
+   becomes a second "selected" state competing with the pane's own. */
+.msg.jumped > .bubble { animation: jumped 1.5s ease-out; }
+@keyframes jumped {
+  0%   { box-shadow: 0 0 0 2px var(--c), 0 0 22px -4px var(--c); }
+  55%  { box-shadow: 0 0 0 2px var(--c), 0 0 22px -4px var(--c); }
+  100% { box-shadow: 0 0 0 0 transparent, 0 0 0 0 transparent; }
+}
+
+/* the jumper itself, top right of the tab row */
+.promptnav { display: flex; align-items: center; gap: 1px; padding-right: 4px; }
+.pn-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; color: var(--fg-faint); margin-right: 5px; }
+.pn-btn { font: inherit; font-size: 13px; line-height: 1; background: none; border: 1px solid var(--line); border-radius: 6px; color: var(--fg-dim); cursor: pointer; padding: 4px 7px; }
+.pn-btn:hover { color: #fff; border-color: var(--c); background: rgba(255,255,255,.05); }
+.pn-btn:disabled { opacity: .3; cursor: default; border-color: var(--line); background: none; color: var(--fg-faint); }
+.pn-pos { font-family: var(--mono); font-size: 11px; color: var(--fg-dim); min-width: 34px; text-align: center; }
+.pn-pos.atend { color: var(--fg-faint); }
+.pane-col.tight .pn-label { display: none; }
+.pn-pos { flex: 0 0 auto; }
+
+.md { font-size: 14.5px; line-height: 1.68; word-wrap: break-word; }
+.md > *:first-child { margin-top: 0; }
+.md > *:last-child { margin-bottom: 0; }
+.md h1, .md h2, .md h3 { font-weight: 650; line-height: 1.3; margin: 1.2em 0 .5em; color: #fff; }
+.md h1 { font-size: 1.28em; border-bottom: 1px solid var(--line); padding-bottom: .25em; }
+.md h2 { font-size: 1.13em; color: #e8e8ee; }
+.md h3 { font-size: 1.02em; color: #d6d6dd; }
+.md p { margin: .62em 0; }
+.md ul, .md ol { margin: .55em 0; padding-left: 1.4em; }
+.md li { margin: .24em 0; }
+.md a { color: var(--c); }
+.md blockquote { border-left: 3px solid var(--line-2); margin: .7em 0; padding: .1em 0 .1em .9em; color: var(--fg-dim); }
+.md code { background: rgba(255,255,255,.08); padding: 1.5px 5px; border-radius: 4px; color: #ffcf9b; }
+.md pre { position: relative; background: #050506; border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: .8em 0; }
+.md pre code { background: none; padding: 0; color: #d5d5dd; font-size: 12.6px; line-height: 1.55; }
+.md pre .lang { position: absolute; top: 0; right: 0; font-size: 10px; font-family: var(--mono); color: var(--fg-faint); background: var(--bg-3); border-radius: 0 7px 0 7px; padding: 2px 8px; letter-spacing: .5px; }
+.md table { border-collapse: collapse; margin: .7em 0; font-size: 13.5px; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--line-2); padding: 5px 10px; text-align: left; }
+.md th { background: var(--bg-3); }
+.md hr { border: none; border-top: 1px solid var(--line); margin: 1.1em 0; }
+
+.verdict { margin: .8em 0; padding: 9px 13px; border-radius: 8px; font-size: 14px; border-left: 3px solid; }
+.verdict b { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 3px; }
+.verdict.ok { background: #0d1f14; border-color: var(--go); color: #d6ffe6; } .verdict.ok b { color: var(--go); }
+.verdict.need { background: #241c08; border-color: var(--wait); color: #ffeecb; } .verdict.need b { color: var(--wait); }
+.verdict.bad { background: #241012; border-color: var(--stop); color: #ffdcdc; } .verdict.bad b { color: var(--stop); }
+
+details.tool { margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.02); }
+details.tool > summary { cursor: pointer; padding: 6px 11px; font-size: 12.3px; color: var(--fg-dim); font-family: var(--mono); list-style: none; display: flex; align-items: center; gap: 8px; }
+details.tool > summary::-webkit-details-marker { display: none; }
+details.tool > summary::before { content: '▸'; color: var(--fg-faint); }
+details.tool[open] > summary::before { content: '▾'; }
+details.tool > summary:hover { color: #fff; }
+details.tool[open] > summary { border-bottom: 1px solid var(--line); }
+.toolname { color: var(--c); font-weight: 600; }
+.toolerr { color: var(--stop); font-weight: 600; }
+details.tool pre { margin: 0; padding: 11px 13px; background: none; border: none; font-size: 12.2px; color: #b6b6c0; max-height: 380px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+details.think { background: rgba(167,139,250,.05); border-color: #2a2438; }
+details.think > summary .toolname { color: #b3a3e0; }
+details.think pre { color: #a99ec7; font-style: italic; }
+
+.pane-body.textonly .msg.notext { display: none; }
+
+/* A question and a plan are the only two things in a transcript that BLOCK.
+   They get the "needs you" amber — the same colour the dot, the lane and the
+   favicon already use for that state, so the meaning is learned once. Never
+   folded: a decision you have to scroll for and then click open is a decision
+   you will miss. */
+.askcard {
+  border: 1px solid var(--wait); border-left-width: 3px; border-radius: 10px;
+  background: color-mix(in srgb, var(--wait) 8%, transparent);
+  padding: 11px 13px 12px; margin: 4px 0 2px;
+}
+.askcard.plan { border-color: #7aa2f7; background: color-mix(in srgb, #7aa2f7 8%, transparent); }
+.ask-tag { font-size: 10.5px; letter-spacing: .6px; text-transform: uppercase; font-weight: 700; color: var(--wait); margin-bottom: 8px; }
+.askcard.plan .ask-tag { color: #9db8fa; }
+.ask-q { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px; margin: 9px 0 7px; }
+.ask-q:first-of-type { margin-top: 0; }
+.ask-qtext { font-size: 14px; font-weight: 650; color: #fff; line-height: 1.4; }
+.ask-chip {
+  flex: 0 0 auto; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+  padding: 2px 7px; border-radius: 999px; background: rgba(255,255,255,.1); color: var(--fg-dim);
+}
+/* Options are a LIST, not buttons — nothing here is clickable, and something
+   that looks pressable but is not is worse than plain text. */
+.ask-opt { border-left: 2px solid rgba(255,255,255,.16); padding: 2px 0 2px 10px; margin: 6px 0; }
+.ask-label { font-size: 13px; font-weight: 600; color: #e8e8ee; line-height: 1.35; }
+.ask-desc { font-size: 12px; color: var(--fg-dim); line-height: 1.45; margin-top: 2px; white-space: pre-wrap; }
+.ask-note { font-size: 11px; color: var(--fg-faint); margin-top: 9px; }
+
+.answercard { border-left: 3px solid var(--go); padding: 2px 0 2px 11px; margin: 4px 0; }
+.answercard .ask-tag { color: var(--go); margin-bottom: 4px; }
+.ans-text { font-size: 12.5px; color: var(--fg-dim); line-height: 1.5; white-space: pre-wrap; }
+.tab.tabtoggle { font-size: 11.5px; color: var(--fg-faint); border-bottom-color: transparent; }
+.tab.tabtoggle.active { color: var(--go); border-bottom-color: var(--go); }
+.lf-hint.waiting { color: var(--go); opacity: 1; }
+
+/* ---------- foot of the conversation ---------- */
+.livefoot { position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 11px; font-family: var(--mono); font-size: 12.5px; border: 1px solid var(--line); background: rgba(255,255,255,.03); color: var(--fg-faint); }
+.livefoot .lf-text { color: var(--fg-dim); }
+.livefoot .lf-hint { margin-left: auto; font-size: 10.5px; opacity: .6; letter-spacing: .4px; text-transform: uppercase; }
+.livefoot .lf-mark { font-weight: 700; width: 14px; text-align: center; }
+.livefoot.working { border-color: #1d5a3a; background: #0d1f14; color: var(--go); }
+.livefoot.working .lf-text { color: var(--go); }
+/* Same move as the frame pulse above: the glow is a fixed shadow on an overlay
+   whose opacity breathes, not a `box-shadow` that is recomputed every frame. */
+.livefoot.working::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  box-shadow: 0 0 14px 1px rgba(74,222,128,.15);
+  animation: glowpulse 2.6s ease-in-out infinite;
+}
+@keyframes glowpulse { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+.livefoot.needs { border-color: rgba(251,191,36,.25); background: #2a2008; color: var(--wait); --bw: 1px; }
+.livefoot.needs .lf-text { color: #ffeecb; }
+.livefoot.failed { border-color: #6b2429; background: #241012; color: var(--stop); }
+.livefoot.done { border-color: #2a3040; background: #0d1015; color: #9aa4b4; }
+.livefoot.idle, .livefoot.stopped { border-style: dashed; }
+
+/* ---------- compose pane ---------- */
+/* Reads as "not started yet": dashed edge, neutral accent, a Draft chip. */
+.pane-col.compose { --c: #6b7280; border-top: 3px dashed #4b5563; background: #0c0c10; }
+.state-chip.draftchip { background: #1a1a20; color: var(--fg-dim); }
+.compose-body { padding: 14px 16px 4px; }
+.compose-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.cf { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--fg-faint); text-transform: uppercase; letter-spacing: .5px; }
+.cf select, .cf input {
+  font: inherit; font-size: 13px; text-transform: none; letter-spacing: 0;
+  background: #050506; color: var(--fg); border: 1px solid var(--line-2);
+  border-radius: 8px; padding: 7px 9px; width: 100%;
+}
+.cf select:focus, .cf input:focus { outline: none; border-color: #6b7280; }
+.compose-draft { border-top: none; background: transparent; padding-top: 4px; }
+.compose-draft textarea { min-height: 120px; }
+
+/* model / effort row inside a pane */
+.panecfg { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; flex-wrap: wrap; }
+.cfglabel { font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; color: var(--fg-faint); }
+/* Says which API this session is really on. Loud enough to notice, quiet
+   enough that a wall of agents on the native runtime shows nothing at all —
+   it is hidden outright there, so the badge only ever means "not the usual". */
+.cfgruntime {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px;
+  padding: 1px 6px; border-radius: 999px;
+  color: #0b0b0f; background: var(--c, #9aa0ff); font-weight: 700;
+}
+.cfgsel {
+  font: inherit; font-size: 12px; cursor: pointer;
+  background: #050506; color: var(--fg-dim); border: 1px solid var(--line-2);
+  border-radius: 7px; padding: 3px 7px;
+}
+.cfgsel:hover { color: #fff; border-color: #4a4a55; }
+.cfgsel:focus { outline: none; border-color: var(--c); }
+
+/* A pane too short for everything drops the SETTINGS, never the input. Model
+   and effort are adjustable whenever the pane is big enough; the place you type
+   has to be there at every size. */
+/* Measured at 210px: children summed to 248px even after the header had shrunk
+   to 22px, because PADDING does not shrink and the status foot is fixed. So a
+   tight pane drops, in this order: the settings row, the status foot (the dot
+   in the header and the pane's own pulse still say it is running), and most of
+   the body padding. The input keeps its full size. */
+.pane-col.tight .panecfg { display: none; }
+.pane-col.tight .pane-footwrap { display: none; }
+.pane-col.tight .pane-body { padding: 8px 12px 2px; }
+.pane-col.tight .pane-draft { padding: 6px 12px 8px; }
+.pane-col.tight .pane-draft textarea { min-height: 36px; }
+.pane-col.tight .draftbar { margin-top: 5px; }
+
+/* ---------- draft ---------- */
+/* THE guarantee: last in the column, never shrinks, never clipped. */
+.pane-draft { flex: 0 0 auto; border-top: 1px solid var(--line); padding: 9px 14px 11px; background: rgba(0,0,0,.35); }
+.draftbar { flex: 0 0 auto; }
+.pane-draft textarea {
+  width: 100%; min-height: 58px; resize: none; font: inherit; font-size: 13.5px; line-height: 1.55;
+  background: #050506; color: var(--fg); border: 1px solid var(--line-2); border-radius: 9px; padding: 9px 11px;
+}
+.pane-draft textarea:focus { outline: none; border-color: var(--c); }
+.draftbar { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+/* a visible target while a file is over the box */
+.pane-draft.dropping textarea { border-color: var(--c); background: rgba(255,255,255,.05); }
+.hint { font-size: 11.5px; color: var(--go); }
+/* Armed = the text is already in the terminal and this click presses Enter.
+   It has to look like a different button, because it now does a different job. */
+.btn.armed { background: #14432a; border-color: var(--go); color: #d6ffe6; font-weight: 650; }
+.btn.armed:hover { background: #1b5c39; }
+
+/* ---------- terminal ---------- */
+/* 42% when there is room, shrinks away when there is not. It used to hold a
+   hard 180px floor, which on a short pane pushed the input off the bottom. */
+.pane-term { flex: 0 1 42%; min-height: 0; border-top: 1px solid var(--line-2); background: #050505; display: flex; flex-direction: column; overflow: hidden; }
+.termbar { display: flex; align-items: center; gap: 10px; padding: 5px 11px; background: #0b0b0e; border-bottom: 1px solid var(--line); font-size: 11.5px; }
+.termtitle { color: var(--c); font-family: var(--mono); }
+.termhost { flex: 1; min-height: 0; padding: 5px 7px; }
+
+/* ---------- timeline ---------- */
+.tl-row { display: grid; grid-template-columns: 130px 1fr; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.tl-when { font-size: 11px; color: var(--fg-faint); font-family: var(--mono); }
+.tl-state { font-size: 11.5px; font-weight: 700; text-transform: uppercase; }
+.tl-state.done { color: #8a94a6; } .tl-state.working { color: var(--go); } .tl-state.failed { color: var(--stop); }
+
+/* ---------- cmd log ---------- */
+.cmdlog { position: fixed; right: 14px; bottom: 14px; width: 440px; max-height: 38vh; background: #0b0b0e; border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.75); display: flex; flex-direction: column; z-index: 40; }
+.cmdlogbar { display: flex; align-items: center; padding: 7px 11px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+#cmdlogBody { overflow-y: auto; padding: 8px 11px; font-family: var(--mono); font-size: 11.6px; }
+.cmdline { padding: 5px 0; border-bottom: 1px dashed var(--line); }
+.cmdline .c { color: #7dd3fc; }
+.cmdline .o { color: var(--fg-faint); white-space: pre-wrap; word-break: break-word; }
+.cmdline .e { color: var(--stop); white-space: pre-wrap; }
+
+/* ---------- modal ---------- */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.8); display: grid; place-items: center; z-index: 60; }
+.sheet { background: #0e0e12; border: 1px solid var(--line-2); border-radius: 14px; padding: 22px; width: min(620px, 92vw); box-shadow: 0 20px 70px rgba(0,0,0,.85); }
+.sheet h3 { margin: 0 0 4px; font-size: 16px; }
+.muted { color: var(--fg-faint); font-size: 12.5px; margin: 0 0 14px; }
+.sheet label { display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 12px; }
+.sheet textarea, .sheet input, .sheet select { display: block; width: 100%; margin-top: 5px; font: inherit; font-size: 13.5px; background: #050506; color: var(--fg); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; }
+.sheet textarea { font-family: var(--sans); resize: vertical; }
+.sheet textarea:focus, .sheet input:focus, .sheet select:focus { outline: none; border-color: #6b7280; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sheetfoot { display: flex; justify-content: flex-end; gap: 9px; margin-top: 6px; align-items: center; }
+
+/* ---------- push panel ---------- */
+/* `.sheet label` is a stacked field (label over input); a checkbox is a line.
+   Both are <label>, so the row shape has to be re-stated here. */
+.pushboxes { display: grid; gap: 7px; margin: 2px 0 14px; }
+.sheet .chk { margin: 0; font-size: 12.5px; color: var(--fg-dim); }
+.sheet .chk input { display: inline-block; width: auto; margin: 0; padding: 0; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a2a32; border-radius: 6px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #3c3c48; background-clip: padding-box; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dot.working, .dot.needs, .dots span, .frame.needs, .pill.hot, .state-chip.needs,
+  .msg.fresh > .bubble, .livefoot.working, .livefoot.needs,
+  .pane-col.working::after { animation: none !important; }
+  .pane-col.working::after { opacity: 0; }
+  /* The flash still has to ANSWER the question — so it becomes a steady ring
+     that the JS clears on the same timer. Nothing blinks, nothing is lost. */
+  .pane-col.found { animation: none !important; box-shadow: inset 0 0 0 3px var(--c); }
+}
+
+/* ---------------------------------------------- the floating overview window
+   Document Picture-in-Picture: an OS window that stays above other apps, so it
+   can sit on the monitor you are actually working on. Everything is sized in
+   viewport units — you will resize this thing down to a stamp, and it has to
+   stay readable from across a desk at any size it ends up. */
+#btnPip { display: inline-flex; align-items: center; justify-content: center; }
+#btnPip svg { display: block; width: 14px; height: 14px; }
+#btnPip.on { color: var(--go); border-color: color-mix(in srgb, var(--go) 45%, var(--line-2)); }
+
+.pipbody {
+  margin: 0; height: 100vh; display: flex; cursor: pointer;
+  background: var(--bg); color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased; user-select: none;
+}
+.pipcard {
+  flex: 1; display: flex; flex-direction: column;
+  padding: clamp(4px, 2vh, 10px) clamp(7px, 3.5vw, 14px);
+  gap: clamp(0px, 0.5vh, 4px);
+}
+.piprow { flex: 1; min-height: 0; display: flex; align-items: center; gap: clamp(5px, 2.2vw, 9px); }
+.piprow.needs   { color: var(--wait); }
+.piprow.working { color: var(--go); }
+.piprow.done    { color: var(--seen); }
+/* Zero dims, never hides: a window whose lines move around is one you have to
+   READ. Fixed positions mean you take it in without focusing on it. */
+.piprow.zero          { color: var(--off); }
+.piprow.zero .piplabel { color: var(--fg-faint); }
+.pipdot { flex: none; width: clamp(5px, 1.9vw, 8px); aspect-ratio: 1; border-radius: 50%; background: currentColor; }
+.pipnum {
+  /* the SMALLER axis decides — a window dragged wide and short must not
+     pretend it has room for 32px numerals */
+  font-size: clamp(15px, min(8.5vw, 19vh), 32px); line-height: 1; font-weight: 700;
+  font-variant-numeric: tabular-nums; min-width: 1.1em; text-align: right;
+}
+.piplabel { font-size: clamp(9px, min(3.4vw, 7.5vh), 13px); color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pipfoot { font-size: clamp(8px, 2.5vw, 10px); color: var(--fg-faint); text-align: right; letter-spacing: .02em; }
+/* Stale is louder than any count, because a number you cannot trust is the
+   only way this window can actively mislead you. */
+.pipbody.stale .piprow { opacity: .4; }
+.pipbody.stale .pipfoot { color: var(--stop); }
+
+/* "Finished, but two shells are still polling" — the fact that made a done
+   agent look like a running one. Grey, because it is an explanation, not a
+   state: the lane already said Done. */
+.badge-shell {
+  font-size: 10px; padding: 1px 6px; border-radius: 999px;
+  border: 1px solid var(--line-2); color: var(--fg-dim); background: var(--bg-3);
+  white-space: nowrap;
+}
+.ph-line2 .badge-shell { font-size: 10.5px; }
+
+/* ---------- context budget ----------
+   The panel answers one question at a glance: how much of the window is gone
+   before an agent has read a line of code, and is that number still climbing?
+   Traffic lights, not percentages, because the topbar gets a half-second look. */
+.ctx-strip {
+  display: flex; align-items: center; gap: 7px; cursor: pointer;
+  font-family: var(--mono); font-size: 11.5px; color: var(--fg-faint);
+  padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--bg-3);
+}
+.ctx-strip:hover { border-color: #3a3a44; }
+.ctx-strip b { color: var(--fg); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.ctx-lamp { width: 9px; height: 9px; border-radius: 50%; flex: none; box-shadow: 0 0 0 3px rgba(255,255,255,.04); }
+.ctx-lamp.green { background: var(--go);   box-shadow: 0 0 8px rgba(74,222,128,.55); }
+.ctx-lamp.amber { background: var(--wait); box-shadow: 0 0 8px rgba(251,191,36,.55); }
+.ctx-lamp.red   { background: var(--stop); box-shadow: 0 0 9px rgba(248,113,113,.7); animation: ctxpulse 1.8s ease-in-out infinite; }
+@keyframes ctxpulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+
+.ctxpanel {
+  position: fixed; z-index: 80; width: 460px; max-height: 82vh; overflow-y: auto;
+  padding: 16px 18px 14px; background: #0e0e12; border: 1px solid var(--line-2);
+  border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,.75); font-size: 13px;
+}
+.ctxpanel h4 { margin: 16px 0 7px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .8px; color: var(--fg-faint); font-weight: 700; }
+.ctxpanel h4:first-child { margin-top: 0; }
+
+/* headline: the one number, big enough to read from across the desk */
+.ctxhead { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; background: #131318; border: 1px solid var(--line); }
+.ctxhead .lamp { width: 16px; height: 16px; border-radius: 50%; flex: none; }
+.ctxhead .big { font-size: 22px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.ctxhead .sub { font-size: 11.5px; color: var(--fg-dim); line-height: 1.35; }
+
+/* one row per project */
+.ctxrow { display: flex; align-items: center; gap: 9px; padding: 6px 0; border-bottom: 1px solid #191920; }
+.ctxrow:last-child { border-bottom: 0; }
+.ctxrow .lamp { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.ctxrow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.ctxrow .tk { font-family: var(--mono); font-variant-numeric: tabular-nums; color: #fff; }
+.ctxrow .dl { font-family: var(--mono); font-size: 11px; width: 58px; text-align: right; }
+.dl.up { color: var(--stop); } .dl.flat { color: var(--fg-faint); } .dl.down { color: var(--go); }
+
+/* file breakdown — which file is the bloat */
+.ctxfile { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }
+.ctxfile .bar { height: 6px; border-radius: 3px; background: #6366f1; flex: none; min-width: 2px; }
+.ctxfile .fn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-dim); }
+.ctxfile .fb { font-family: var(--mono); font-size: 11px; color: #fff; font-variant-numeric: tabular-nums; }
+.ctxfile .fw { font-size: 10px; color: var(--fg-faint); }
+
+/* live sessions — real fill of the real window */
+.ctxsess { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+.ctxsess .track { flex: 1; height: 8px; border-radius: 4px; background: #1c1c22; overflow: hidden; }
+.ctxsess .fill { height: 100%; border-radius: 4px; background: var(--go); }
+.ctxsess .fill.amber { background: var(--wait); } .ctxsess .fill.red { background: var(--stop); }
+.ctxsess .pc { font-family: var(--mono); font-size: 11px; color: #fff; width: 82px; text-align: right; font-variant-numeric: tabular-nums; }
+
+.ctxnote { margin: 10px 0 0; font-size: 11px; line-height: 1.5; color: var(--fg-faint); }
+.ctxwarn { margin-top: 8px; padding: 8px 10px; border-radius: 8px; font-size: 11.5px; line-height: 1.45;
+  background: rgba(251,191,36,.09); border: 1px solid rgba(251,191,36,.28); color: #f5d78e; }
+.ctxwarn.bad { background: rgba(248,113,113,.09); border-color: rgba(248,113,113,.3); color: #f6b0b0; }
+.ctxspark { display: flex; align-items: flex-end; gap: 2px; height: 26px; margin-top: 6px; }
+.ctxspark span { flex: 1; background: #3b3b45; border-radius: 1px; min-height: 2px; }
+.ctxspark span.last { background: #a78bfa; }
+
+/* ---------- a terminal that is its own pane ----------
+   Same frame as any pane so it reads as one of them, but it draws no wave and
+   no lane colour: a terminal has no state of its own, it is a window onto one. */
+.pane-col.term { --c: #7a8494; background: #050505; }
+.pane-col.term .termhost { flex: 1; min-height: 0; padding: 6px 8px; overflow: hidden; }
+.pane-col.term .ph-line2 { padding-bottom: 6px; }
+.state-chip.termchip { background: var(--bg-3); color: var(--fg-dim); border: 1px solid var(--line-2); }
+.term-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--fg-faint); font-size: 12px; }
+
+/* ---------- search ---------- */
+/* The matched words, in the snippet from the prompt. Not a colour block: it has
+   to survive being read next to the agent's own hue. */
+.r-detail mark { background: color-mix(in srgb, var(--wait) 30%, transparent); color: var(--fg); border-radius: 2px; padding: 0 1px; }
+.r-detail.hit { color: var(--fg-dim); }
+.searchmore {
+  margin: 6px 8px 10px; padding: 7px 10px; border: 1px dashed var(--line-2); border-radius: 8px;
+  color: var(--fg-dim); font-size: 11.5px; cursor: pointer; text-align: center;
+}
+.searchmore:hover { border-color: var(--fg-faint); color: var(--fg); }
+
+/* ================= THE FACE OF A PANE — colour × pattern =================
+   A 3px line at the top was the whole identity, and at a glance a wall of panes
+   was a wall of black rectangles. Now the HEAD is the agent's letterhead: it
+   carries a tint of its colour and one of eight textures, so "the striped teal
+   one" is a thing you can remember and point at.
+
+   Rules it must not break:
+   · the text sits ABOVE the texture and keeps its contrast — the pattern is a
+     layer behind it, never a background the words have to fight,
+   · nothing moves. A pattern that animates would mean "this one is running",
+     and motion already means exactly that,
+   · the same face in the sidebar row, the pane and its terminal, or the mark
+     would not be a way to recognise anything. */
+.pane-col, .row-agent {
+  /* the ink the texture is drawn in — one place, so all eight agree */
+  --pc: color-mix(in srgb, var(--c) 30%, transparent);
+  --pc-soft: color-mix(in srgb, var(--c) 17%, transparent);
+}
+.pane-col { border-top-width: 4px; }
+
+/* OPAQUE on purpose. A translucent tint let the lane surface through, and on a
+   pane that wants you (`--sf-needs`, amber) three different agents rendered as
+   three identical amber letterheads — the identity disappeared exactly when
+   several panes were competing for attention. The head answers WHO; the body,
+   the chip and the dot answer WHAT. */
+.pane-head { position: relative; background: color-mix(in srgb, var(--c) 13%, #0a0a0f); }
+.pane-head::before { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+.pane-head > * { position: relative; z-index: 1; }
+
+/* the eight textures */
+.pat0 .pane-head::before { background-image: repeating-linear-gradient(45deg,  var(--pc) 0 2px, transparent 2px 9px); }
+.pat1 .pane-head::before { background-image: repeating-linear-gradient(-45deg, var(--pc) 0 3px, transparent 3px 14px); }
+.pat2 .pane-head::before { background-image: radial-gradient(var(--pc) 1.4px, transparent 1.5px); background-size: 9px 9px; }
+.pat3 .pane-head::before { background-image: radial-gradient(circle, transparent 2px, var(--pc) 2.1px, transparent 3.2px); background-size: 13px 13px; }
+.pat4 .pane-head::before { background-image: repeating-linear-gradient(90deg, var(--pc) 0 2px, transparent 2px 11px); }
+.pat5 .pane-head::before { background-image: repeating-linear-gradient(180deg, var(--pc) 0 2px, transparent 2px 8px); }
+.pat6 .pane-head::before { background-image: repeating-linear-gradient(90deg, var(--pc-soft) 0 1.5px, transparent 1.5px 12px), repeating-linear-gradient(180deg, var(--pc-soft) 0 1.5px, transparent 1.5px 12px); }
+.pat7 .pane-head::before { background-image: repeating-linear-gradient(45deg, var(--pc-soft) 0 1.5px, transparent 1.5px 10px), repeating-linear-gradient(-45deg, var(--pc-soft) 0 1.5px, transparent 1.5px 10px); }
+.pat8  .pane-head::before { background-image: repeating-linear-gradient(90deg, var(--pc) 0 7px, transparent 7px 13px); background-size: auto 7px; }
+.pat9  .pane-head::before { background-image: repeating-linear-gradient(45deg, var(--pc-soft) 0 7px, transparent 7px 18px); }
+.pat10 .pane-head::before { background-image: repeating-linear-gradient(90deg, var(--pc-soft) 0 1px, transparent 1px 6px), repeating-linear-gradient(180deg, var(--pc-soft) 0 1px, transparent 1px 6px); }
+.pat11 .pane-head::before { background-image: radial-gradient(var(--pc) 1.6px, transparent 1.7px), radial-gradient(var(--pc) 1.6px, transparent 1.7px); background-size: 16px 16px; background-position: 0 0, 8px 8px; }
+
+/* The same texture on the row's edge bar, cut out of the colour rather than
+   painted on it — 7px is too narrow for a second ink to read. */
+.row-agent::before { width: 7px; }
+.row-agent.pat0::before { background-image: repeating-linear-gradient(45deg,  rgba(0,0,0,.6) 0 2px, transparent 2px 5px); }
+.row-agent.pat1::before { background-image: repeating-linear-gradient(-45deg, rgba(0,0,0,.6) 0 3px, transparent 3px 7px); }
+.row-agent.pat2::before { background-image: radial-gradient(rgba(0,0,0,.65) 1.3px, transparent 1.4px); background-size: 5px 5px; }
+.row-agent.pat3::before { background-image: radial-gradient(circle, transparent 1.2px, rgba(0,0,0,.6) 1.3px, transparent 2.4px); background-size: 7px 7px; }
+.row-agent.pat4::before { background-image: repeating-linear-gradient(90deg, rgba(0,0,0,.55) 0 2px, transparent 2px 4px); }
+.row-agent.pat5::before { background-image: repeating-linear-gradient(180deg, rgba(0,0,0,.6) 0 2px, transparent 2px 6px); }
+.row-agent.pat6::before { background-image: repeating-linear-gradient(180deg, rgba(0,0,0,.5) 0 1.5px, transparent 1.5px 5px), repeating-linear-gradient(90deg, rgba(0,0,0,.5) 0 1.5px, transparent 1.5px 5px); }
+.row-agent.pat7::before { background-image: repeating-linear-gradient(45deg, rgba(0,0,0,.5) 0 1.5px, transparent 1.5px 5px), repeating-linear-gradient(-45deg, rgba(0,0,0,.5) 0 1.5px, transparent 1.5px 5px); }
+.row-agent.pat8::before  { background-image: repeating-linear-gradient(180deg, rgba(0,0,0,.6) 0 4px, transparent 4px 8px); }
+.row-agent.pat9::before  { background-image: repeating-linear-gradient(45deg, rgba(0,0,0,.55) 0 5px, transparent 5px 11px); }
+.row-agent.pat10::before { background-image: repeating-linear-gradient(180deg, rgba(0,0,0,.45) 0 1px, transparent 1px 3px), repeating-linear-gradient(90deg, rgba(0,0,0,.45) 0 1px, transparent 1px 3px); }
+.row-agent.pat11::before { background-image: radial-gradient(rgba(0,0,0,.6) 1.3px, transparent 1.4px), radial-gradient(rgba(0,0,0,.6) 1.3px, transparent 1.4px); background-size: 8px 8px; background-position: 0 0, 4px 4px; }
+
+/* A compose pane and a terminal have no agent identity of their own; a tinted
+   head would be a lie about which agent they belong to. */
+.pane-col.compose .pane-head { background: rgba(255, 255, 255, .03); }
+.pane-col.compose .pane-head::before { background-image: none; }
+
+/* Off-screen messages cost layout and paint even when nobody can see them, and
+   a pane holds thousands of nodes. `content-visibility: auto` lets the browser
+   skip all of that for anything scrolled out of view — nothing is removed, no
+   message is lost, the DOM is untouched. `contain-intrinsic-size: auto` makes
+   it remember each one's real height, so the scrollbar does not jump. */
+.pane-body .msg { content-visibility: auto; contain-intrinsic-size: auto 72px; }
+
+/* ---------- workspaces: one window, one folder ---------- */
+.wschip { display: flex; align-items: center; gap: 7px; max-width: 340px; min-width: 0; font: inherit; font-size: 12.5px; cursor: pointer;
+  background: #121218; color: var(--fg); border: 1px solid var(--line-2); border-radius: 8px; padding: 4px 10px; transition: .13s; }
+.wschip:hover { border-color: #4a4a55; background: #18181f; }
+.wschip .wsname { font-weight: 700; color: #fff; white-space: nowrap; }
+.wschip .wsroot { color: var(--fg-faint); font-family: var(--mono); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.wschip .wsall { font-size: 10.5px; color: #fbbf24; white-space: nowrap; }
+.wschip .wsbadge { font-size: 10.5px; font-weight: 700; color: #0b0b0e; background: #7dd3fc; border-radius: 999px; padding: 0 6px; line-height: 16px; }
+.wschip .wscaret { color: var(--fg-faint); font-size: 10px; }
+.wschip.bad { border-color: #7f2a2f; background: #2a1012; }
+.wschip.bad .wsname { color: #ffd7d7; }
+
+.wsbar { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 7px 14px; font-size: 12.5px; color: var(--fg-dim);
+  background: #0d1a24; border-bottom: 1px solid #1e3a4c; }
+.wsbar b { color: #fff; font-weight: 600; }
+.wsbar .wsbarnote { color: #fbbf24; font-size: 12px; }
+
+.sheet.wssheet { width: min(760px, 94vw); max-height: 90vh; overflow: auto; }
+.wsblock { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
+.wsblock h4 { margin: 0 0 8px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .8px; color: var(--fg-faint); font-weight: 700; }
+.wshead { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.wshead h4 { margin: 0; }
+.wsfields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px; }
+.sheet .wsfields label { margin-bottom: 6px; }
+.wsmsg { font-size: 12px; color: #fbbf24; margin-right: auto; }
+.wslist { display: grid; gap: 4px; }
+.wsrow { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; background: #0b0b0f; }
+.wsrow.me { border-color: #3b4a5e; background: #111823; }
+.wsrow.hid { opacity: .55; }
+.wsdot { width: 8px; height: 8px; border-radius: 50%; background: #3a3a44; flex: 0 0 8px; }
+.wsdot.on { background: var(--go); }
+.wstxt { flex: 1; min-width: 0; }
+.wsrowname { font-weight: 600; font-size: 13px; color: #fff; display: flex; align-items: center; gap: 8px; }
+.wsrowsub { font-size: 11.5px; color: var(--fg-faint); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wstag { font-size: 10.5px; font-weight: 600; color: #7dd3fc; border: 1px solid #1e3a4c; border-radius: 999px; padding: 0 7px; white-space: nowrap; }
+.wstoggle { font-size: 12px; color: var(--fg-faint); cursor: pointer; padding: 4px 2px; }
+.wstoggle:hover { color: var(--fg); }
+.wssugg { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 2px 0 8px; }
+.wssugghead { font-size: 11.5px; color: var(--fg-faint); margin-right: 2px; }
+.wschipbtn { font: inherit; font-family: var(--mono); font-size: 11px; cursor: pointer; color: var(--fg-dim); background: var(--bg-3);
+  border: 1px solid var(--line-2); border-radius: 999px; padding: 2px 9px; }
+.wschipbtn:hover { color: #fff; border-color: #4a4a55; }
+@media (max-width: 1800px) { .wschip .wsroot { display: none; } }

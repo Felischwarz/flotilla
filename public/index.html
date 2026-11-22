@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flotilla</title>
+<link rel="stylesheet" href="/vendor/xterm.css">
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰️</text></svg>">
+</head>
+<body>
+
+<div id="frame" class="frame"></div>
+
+<header id="topbar">
+  <div class="brand"><span class="logo">▚</span><span><b>flotilla</b></span></div>
+  <button id="wsChip" class="wschip" title="Workspace — which folder this window is about"><span class="wsname">…</span></button>
+  <div id="counts" class="counts"></div>
+  <div class="spacer"></div>
+  <div id="mem" class="usage-strip mem-strip" title="RAM right now — click for what is using it"></div>
+  <div id="ctx" class="ctx-strip" title="How full the context is, and what every session pays before work starts"></div>
+  <div id="usage" class="usage-strip" title="Token usage, read from your transcripts"></div>
+  <button id="btnPip" class="btn ghost small" title="Float a small overview on top of everything — drag it to your other monitor"></button>
+  <button id="btnExport" class="btn ghost small" title="Export every prompt in this workspace (including agents not started yet) as a .txt file, separated by blank lines">⇩ TXT</button>
+  <button id="btnWindow" class="btn ghost small" title="New window on another folder (its own workspace)">⧉</button>
+  <button id="btnSound" class="btn ghost small" title="Sound">🔔</button>
+  <button id="btnPush" class="btn ghost small" title="Push notifications to your phone, and reply from it">📱</button>
+  <button id="btnRestart" class="btn ghost small" title="Restart flotilla (server)">⟳</button>
+  <button id="btnNew" class="btn primary">+ New agent</button>
+  <div id="conn" class="conn" title="Live connection">•</div>
+</header>
+<div id="wsbar" class="wsbar" hidden></div>
+
+<main id="layout">
+  <aside id="sidebar">
+    <div class="searchwrap">
+      <input id="search" type="search" placeholder="Search…  ( / )" title="Searches the name, the folder and the whole first prompt. A search ignores the Done and Interactive filters — typing is asking to find, not to browse." autocomplete="off">
+      <div class="listctl">
+        <select id="sortBy" title="Sort within each group">
+          <option value="recent">Newest activity</option>
+          <option value="oldest">Oldest activity</option>
+          <option value="unread">Unread first</option>
+          <option value="name">Name A–Z</option>
+          <option value="created">Newest created</option>
+          <option value="folder">Folder</option>
+        </select>
+        <select id="groupBy" title="Group by">
+          <option value="state">Group: state</option>
+          <option value="folder">Group: folder</option>
+          <option value="none">No groups</option>
+        </select>
+        <button id="btnReadAll" class="icobtn" title="Mark everything read">✓</button>
+      </div>
+    </div>
+    <div id="list" class="list"></div>
+    <div class="sidefoot">
+      <label class="chk"><input type="checkbox" id="showDone" checked> done</label>
+      <label class="chk"><input type="checkbox" id="showInteractive"> terminals</label>
+      <label class="chk" title="Pinned chats sit above everything. Off: they sort in with the rest and keep the pin."><input type="checkbox" id="pinsTop" checked> pins</label>      <div class="spacer"></div>
+      <button id="btnArchiveView" class="icobtn wide" title="Archived agents are hidden here, never deleted">Archive</button>
+    </div>
+  </aside>
+
+  <section id="detail">
+    <div id="empty" class="empty">
+      <div class="emptyinner">
+        <div class="emptyglyph">▚</div>
+        <h2>Pick an agent on the left</h2>
+        <p>Click an agent to open it as a tab. Clicking another one opens it <b>beside</b> the first, so you can watch several at once.</p>
+        <p class="tiny">This dashboard only <b>reads</b> what Claude Code writes. Actions run as a real <code>claude</code> command.</p>
+      </div>
+    </div>
+    <div id="panes" class="panes"></div>
+  </section>
+</main>
+
+<div id="cmdlog" class="cmdlog" hidden>
+  <div class="cmdlogbar"><b>Commands run</b><div class="spacer"></div><button id="cmdlogClose" class="btn ghost small">✕</button></div>
+  <div id="cmdlogBody"></div>
+</div>
+
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/addon-fit.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
